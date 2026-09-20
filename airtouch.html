@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Airtouch — control the screen with your hand</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #06090d;
+    --panel: #0d1420;
+    --cyan: #5be7ff;
+    --magenta: #ff4d9e;
+    --amber: #ffb454;
+    --text: #dce7ef;
+    --dim: #6b7c8c;
+    --line: #1b2733;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Grotesk', sans-serif;
+    overflow: hidden;
+  }
+
+  #app {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
+  video {
+    display: none;
+  }
+
+  #stage {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+    background: #000;
+  }
+
+  /* ---- Overlay HUD ---- */
+  .hud {
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0px) + 16px);
+    left: 16px;
+    right: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    pointer-events: none;
+    z-index: 5;
+  }
+
+  .brand {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .brand .mark {
+    font-weight: 700;
+    font-size: 1.05rem;
+    letter-spacing: 0.02em;
+  }
+  .brand .mark span { color: var(--cyan); }
+  .brand .sub {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--dim);
+  }
+
+  .score-box {
+    font-family: 'IBM Plex Mono', monospace;
+    text-align: right;
+    background: rgba(6,9,13,0.55);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 8px 14px;
+    backdrop-filter: blur(6px);
+  }
+  .score-box .n {
+    font-size: 1.4rem;
+    color: var(--amber);
+    line-height: 1;
+  }
+  .score-box .l {
+    font-size: 0.62rem;
+    color: var(--dim);
+    letter-spacing: 0.06em;
+  }
+
+  #status {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 18px;
+    padding: 32px;
+    text-align: center;
+    background: radial-gradient(circle at 50% 40%, #0d1622 0%, #06090d 75%);
+    z-index: 20;
+  }
+  #status h1 {
+    font-size: 1.6rem;
+    margin: 0;
+    font-weight: 700;
+    max-width: 340px;
+  }
+  #status h1 em {
+    font-style: normal;
+    color: var(--cyan);
+  }
+  #status p {
+    max-width: 320px;
+    color: var(--dim);
+    font-size: 0.92rem;
+    line-height: 1.5;
+    margin: 0;
+  }
+  #status .hint {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--magenta);
+  }
+  button#start {
+    background: var(--cyan);
+    color: #041017;
+    border: none;
+    padding: 13px 28px;
+    border-radius: 999px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 0.95rem;
+    cursor: pointer;
+  }
+  button#start:active { transform: scale(0.97); }
+  button#start:disabled { opacity: 0.5; }
+
+  #hand-dot {
+    position: absolute;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 2px solid var(--cyan);
+    background: radial-gradient(circle, rgba(91,231,255,0.35), transparent 70%);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 6;
+    transition: width 0.08s, height 0.08s, border-color 0.08s;
+    display: none;
+  }
+  #hand-dot.pinch {
+    width: 14px;
+    height: 14px;
+    border-color: var(--magenta);
+    background: radial-gradient(circle, rgba(255,77,158,0.5), transparent 70%);
+  }
+
+  .bubble {
+    position: absolute;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 4;
+    border: 1.5px solid rgba(255,255,255,0.25);
+    box-shadow: 0 0 22px 2px var(--glow, rgba(91,231,255,0.35)) inset, 0 0 18px var(--glow, rgba(91,231,255,0.2));
+    background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.15), rgba(255,255,255,0.02));
+  }
+
+  .pop {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    border: 2px solid var(--amber);
+    opacity: 0.9;
+    animation: popRing 0.4s ease-out forwards;
+    pointer-events: none;
+    z-index: 4;
+  }
+  @keyframes popRing {
+    from { width: 10px; height: 10px; opacity: 0.9; }
+    to { width: 90px; height: 90px; opacity: 0; }
+  }
+
+  .footer-hint {
+    position: absolute;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.66rem;
+    color: var(--dim);
+    z-index: 5;
+    pointer-events: none;
+  }
+
+  #error-box {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+    text-align: center;
+    z-index: 30;
+    background: var(--bg);
+  }
+  #error-box.show { display: flex; }
+  #error-box p { color: var(--dim); max-width: 320px; line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <video id="cam" playsinline autoplay muted></video>
+  <canvas id="stage"></canvas>
+  <div id="hand-dot"></div>
+
+  <div class="hud">
+    <div class="brand">
+      <div class="mark">air<span>touch</span></div>
+      <div class="sub">HAND-TRACKED INPUT · NO CONTROLLER</div>
+    </div>
+    <div class="score-box">
+      <div class="n" id="score">0</div>
+      <div class="l">POPPED</div>
+    </div>
+  </div>
+
+  <div class="footer-hint">point your index finger to aim · pinch thumb + finger to pop</div>
+
+  <div id="status">
+    <h1>Control the screen with <em>your hand.</em></h1>
+    <p>Airtouch watches your webcam and turns your index finger into a cursor. Pinch your thumb and finger together to pop the orbs before they drift away.</p>
+    <button id="start">Turn on camera</button>
+    <div class="hint" id="status-sub"></div>
+  </div>
+
+  <div id="error-box">
+    <p id="error-msg">Camera access was blocked. Allow camera permission in your browser settings and reload to play.</p>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+
+<script>
+(function () {
+  const video = document.getElementById('cam');
+  const canvas = document.getElementById('stage');
+  const ctx = canvas.getContext('2d');
+  const statusEl = document.getElementById('status');
+  const statusSub = document.getElementById('status-sub');
+  const startBtn = document.getElementById('start');
+  const errorBox = document.getElementById('error-box');
+  const errorMsg = document.getElementById('error-msg');
+  const handDot = document.getElementById('hand-dot');
+  const scoreEl = document.getElementById('score');
+  const app = document.getElementById('app');
+
+  let score = 0;
+  let bubbles = [];
+  let running = false;
+  let lastPinch = false;
+  let cursor = { x: -999, y: -999, active: false };
+  const colors = [
+    ['#5be7ff', 'rgba(91,231,255,0.5)'],
+    ['#ff4d9e', 'rgba(255,77,158,0.5)'],
+    ['#ffb454', 'rgba(255,180,84,0.5)'],
+    ['#8b7bff', 'rgba(139,123,255,0.5)']
+  ];
+
+  function resize() {
+    canvas.width = app.clientWidth;
+    canvas.height = app.clientHeight;
+  }
+  window.addEventListener('resize', resize);
+
+  function spawnBubble() {
+    const r = 28 + Math.random() * 26;
+    const c = colors[Math.floor(Math.random() * colors.length)];
+    bubbles.push({
+      x: r + Math.random() * (canvas.width - r * 2),
+      y: canvas.height + r + Math.random() * 200,
+      r,
+      vy: 0.6 + Math.random() * 0.9,
+      wob: Math.random() * Math.PI * 2,
+      color: c[0],
+      glow: c[1]
+    });
+  }
+
+  function popEffect(x, y) {
+    const el = document.createElement('div');
+    el.className = 'pop';
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    app.appendChild(el);
+    setTimeout(() => el.remove(), 420);
+  }
+
+  function loop() {
+    if (!running) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    if (Math.random() < 0.02 && bubbles.length < 9) spawnBubble();
+
+    bubbles.forEach(b => {
+      b.y -= b.vy;
+      b.wob += 0.02;
+      b.x += Math.sin(b.wob) * 0.4;
+    });
+    bubbles = bubbles.filter(b => b.y + b.r > -20);
+
+    ctx.save();
+    bubbles.forEach(b => {
+      const grd = ctx.createRadialGradient(b.x - b.r * 0.3, b.y - b.r * 0.3, b.r * 0.1, b.x, b.y, b.r);
+      grd.addColorStop(0, 'rgba(255,255,255,0.35)');
+      grd.addColorStop(0.5, b.color + '55');
+      grd.addColorStop(1, b.color + '11');
+      ctx.beginPath();
+      ctx.fillStyle = grd;
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.stroke();
+    });
+    ctx.restore();
+
+    requestAnimationFrame(loop);
+  }
+
+  function checkPops(px, py, isPinching) {
+    if (!isPinching) return;
+    for (let i = bubbles.length - 1; i >= 0; i--) {
+      const b = bubbles[i];
+      const d = Math.hypot(b.x - px, b.y - py);
+      if (d < b.r + 10) {
+        bubbles.splice(i, 1);
+        score++;
+        scoreEl.textContent = score;
+        popEffect(px, py);
+      }
+    }
+  }
+
+  function onResults(results) {
+    if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+      handDot.style.display = 'none';
+      cursor.active = false;
+      return;
+    }
+    const lm = results.multiHandLandmarks[0];
+    const indexTip = lm[8];
+    const thumbTip = lm[4];
+
+    // mirror x because the video is displayed flipped
+    const px = (1 - indexTip.x) * canvas.width;
+    const py = indexTip.y * canvas.height;
+
+    const pinchDist = Math.hypot(
+      (indexTip.x - thumbTip.x) * canvas.width,
+      (indexTip.y - thumbTip.y) * canvas.height
+    );
+    const isPinching = pinchDist < 42;
+
+    handDot.style.display = 'block';
+    handDot.style.left = px + 'px';
+    handDot.style.top = py + 'px';
+    handDot.classList.toggle('pinch', isPinching);
+
+    if (isPinching && !lastPinch) {
+      checkPops(px, py, true);
+    } else if (isPinching) {
+      checkPops(px, py, true);
+    }
+    lastPinch = isPinching;
+    cursor = { x: px, y: py, active: true };
+  }
+
+  async function begin() {
+    startBtn.disabled = true;
+    statusSub.textContent = 'requesting camera…';
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+      video.srcObject = stream;
+      await video.play();
+      resize();
+
+      const hands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+      });
+      hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.6,
+        minTrackingConfidence: 0.6
+      });
+      hands.onResults(onResults);
+
+      const camera = new Camera(video, {
+        onFrame: async () => {
+          await hands.send({ image: video });
+        },
+        width: 640,
+        height: 480
+      });
+      camera.start();
+
+      running = true;
+      statusEl.style.display = 'none';
+      loop();
+    } catch (err) {
+      statusEl.style.display = 'none';
+      errorBox.classList.add('show');
+      if (err && err.name === 'NotAllowedError') {
+        errorMsg.textContent = 'Camera access was blocked. Allow camera permission in your browser settings and reload to play.';
+      } else {
+        errorMsg.textContent = 'Could not start the camera on this device. Try a different browser, or check your camera is not in use elsewhere.';
+      }
+    }
+  }
+
+  startBtn.addEventListener('click', begin);
+  resize();
+})();
+</script>
+</body>
+</html>
